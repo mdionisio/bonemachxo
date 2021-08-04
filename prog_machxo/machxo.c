@@ -149,12 +149,13 @@ static void to_be_4bytes(uint32_t val, uint8_t *buffer)
 	buffer[0] = (val & 0xFF000000) >> 24;
 }
 
-int open_device(char *dev_name, int mode, int addr)
+int open_device(char *dev_name, int lmode, int addr)
 {
 	DEBUG(fprintf(stderr, "Open device\n"));
 	if (dev_name == 0)
 		dev_name = DEFAULT_SPI_DEV;
 	i2c_addr = addr;
+	mode = lmode;
 	dev_fd = open(dev_name, O_RDWR);
 	if (dev_fd < 0)
 		perror("open_device");
