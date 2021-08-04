@@ -47,6 +47,7 @@
 #define DIRECTION_RECEIVE 1
 
 #define DEFAULT_SPI_DEV "/dev/spidev2.0"
+#define DEFAULT_I2C_DEV "/dev/i2c-0"
 
 #define MACHXO2_PAGE_SIZE 16
 #define MODE_SPI 0

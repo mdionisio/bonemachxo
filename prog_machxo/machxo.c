@@ -153,7 +153,7 @@ int open_device(char *dev_name, int lmode, int addr)
 {
 	DEBUG(fprintf(stderr, "Open device\n"));
 	if (dev_name == 0)
-		dev_name = DEFAULT_SPI_DEV;
+		dev_name = (lmode == MODE_SPI) ? DEFAULT_SPI_DEV : DEFAULT_I2C_DEV;
 	i2c_addr = addr;
 	mode = lmode;
 	dev_fd = open(dev_name, O_RDWR);

@@ -197,7 +197,7 @@ static void print_usage(const char *prog)
 
 int main(int argc, char **argv)
 {
-	char *device_file = DEFAULT_SPI_DEV;
+	char *device_file = NULL;
 	int mode = MODE_SPI;
 	int i2c_addr = 0x40;
 	int op = DO_ERASE | DO_FLASH | DO_VERIFY;
@@ -237,7 +237,9 @@ int main(int argc, char **argv)
 	}
 	if (open_jedec(argv[0]) != 1)
 		return 1;
-	if (open_device(0, mode, i2c_addr) != 1)
+	if (device_file == NULL)
+		device_file = (mode == MODE_SPI) ? DEFAULT_SPI_DEV : DEFAULT_I2C_DEV;
+	if (open_device(device_file, mode, i2c_addr) != 1)
 		return 1;
 	do_work(op);
   //initialize_flash();
