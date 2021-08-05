@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -102,7 +103,14 @@ static int send_receive(uint8_t command, uint32_t operand, int direction, uint8_
 				spi_xfer[2].rx_buf = (unsigned long)data;
 			spi_xfer[2].len = data_len;
 		}
-		status = ioctl(dev_fd, SPI_IOC_MESSAGE(num_xfers), spi_xfer);
+		do
+		{
+			status = ioctl(dev_fd, SPI_IOC_MESSAGE(num_xfers), spi_xfer);
+#if DEBUG2
+			if (status < 0)
+				fprintf(stderr, "send_receive: (spi) error message: %s\n", strerror(errno));
+#endif
+		} while ((status == -1) && (errno == EAGAIN));
 	}
 	else if (mode == MODE_I2C)
 	{
@@ -119,7 +127,14 @@ static int send_receive(uint8_t command, uint32_t operand, int direction, uint8_
 		}
 		i2c_packets.msgs = i2c_messages;
 		i2c_packets.nmsgs = num_xfers;
-		status = ioctl(dev_fd, I2C_RDWR, &i2c_packets);
+		do
+		{
+			status = ioctl(dev_fd, I2C_RDWR, &i2c_packets);
+#if DEBUG2
+			if (status < 0)
+				fprintf(stderr, "send_receive: (i2c: 0x%x) error message: %s\n", i2c_addr, strerror(errno));
+#endif
+		} while ((status == -1) && (errno == EINTR));
 	}
 #if DEBUG2
 	if (direction != DIRECTION_SEND)
