@@ -8,12 +8,16 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include "machxo.h"
 #include "jedec.h"
 
 #define DO_ERASE 1
 #define DO_FLASH 2
 #define DO_VERIFY 4
+#define DO_REFRESH 8
+#define DO_FEATURE 16
+#define DO_USERFLASH 32
 
 static int all_zero(uint8_t *data, int data_len)
 {
@@ -24,23 +28,21 @@ static int all_zero(uint8_t *data, int data_len)
 	return 1;
 }
 
-static void abort_and_clean_up(char *message)
+static void abort_and_clean_up(char *message, uint32_t erase_type)
 {
-	erase_flash();
+	fprintf(stderr, "\n%s Aborting. Flash is erased. Start...\n", (message != NULL) ? message : "");
+	erase_flash(erase_type);
 	wait_not_busy();
 	refresh();
-	if (message != 0)
-		fprintf(stderr, "%s\n", message);
-	fprintf(stderr, "Aborting. Flash is erased.\n");
+	fprintf(stderr, "\n%s Aborting. Flash is erased. Done\n", (message != NULL) ? message : "");
 	exit(1);
 }
 
 static void just_abort(char *message)
 {
+	fprintf(stderr, "\n%s Aborting. Flash may be incorrect: Start...\n", (message != NULL) ? message : "");
 	refresh();
-	if (message != 0)
-		fprintf(stderr, "%s\n", message);
-	fprintf(stderr, "Aborting. Flash may be incorrect.\n");
+	fprintf(stderr, "\n%s Aborting. Flash may be incorrect. Done\n", (message != NULL) ? message : "");
 	exit(1);
 }
 
@@ -68,9 +70,18 @@ static void do_work(int op)
 		fprintf(stderr, "Failed to enable configuration.\n");
 		exit(1);
 	}
+	// compute erase type
+	uint32_t erase_type = ERASE_FEATURE_ROW | ERASE_CONFIGURATION | ERASE_USER_FLASH;
+	if (op & DO_FEATURE == 0) {
+		erase_type &= ~ERASE_FEATURE_ROW;
+	}
+	if (op & DO_USERFLASH == 0) {
+		erase_type &= ~ERASE_USER_FLASH;
+	}
+
 	if (op & DO_ERASE)
 	{
-		if (erase_flash() != 1 || wait_not_busy() != 1)
+		if (erase_flash(erase_type) != 1 || wait_not_busy() != 1)
 		{
 			fprintf(stderr, "Failed to erase flash.\n");
 			exit(1);
@@ -80,7 +91,7 @@ static void do_work(int op)
 	{
 		if (get_next_jedec_section(&section, &address, &data, &data_len) != 1)
 		{
-			abort_and_clean_up("Input file error.");
+			abort_and_clean_up("Input file error.", erase_type);
 			return;
 		}
 		switch (section)
@@ -93,18 +104,18 @@ static void do_work(int op)
 			if (op & DO_FLASH)
 			{
 				if ((address / MACHXO2_PAGE_SIZE) * MACHXO2_PAGE_SIZE != address)
-					abort_and_clean_up("Flash address not multiple of page size");
+					abort_and_clean_up("Flash address not multiple of page size", erase_type);
 				if ((data_len / MACHXO2_PAGE_SIZE) * MACHXO2_PAGE_SIZE != data_len)
-					abort_and_clean_up("Data block size not multiple of page size");
+					abort_and_clean_up("Data block size not multiple of page size", erase_type);
 				if (!all_zero(data, data_len))
 				{
 					page_address = address / MACHXO2_PAGE_SIZE;
 					if (set_configuration_flash_address(page_address, tag_data_seen) != 1)
-						abort_and_clean_up("Failed to set flash address");
+						abort_and_clean_up("Failed to set flash address", erase_type);
 					for (i = 0; i < data_len; i += MACHXO2_PAGE_SIZE)
 					{
 						if (program_configuration_flash(&data[i], MACHXO2_PAGE_SIZE) != 1 || wait_not_busy() != 1)
-							abort_and_clean_up("Failed to program device.");
+							abort_and_clean_up("Failed to program device.", erase_type);
 					}
 				}
 			}
@@ -139,35 +150,42 @@ static void do_work(int op)
 			}
 			break;
 		case SECTION_ARCH:
-			if (op & DO_FLASH)
-			{
-				if (data_len != 10)
-					abort_and_clean_up("Incorrect size feature row and bits");
-				if (program_feature_row(data) != 1 || wait_not_busy() != 1)
-					abort_and_clean_up("Failed to program feature row");
-				if (program_feature_bits(data + 8) != 1 || wait_not_busy() != 1)
-					abort_and_clean_up("Failed to program feature bits");
-			}
-			if (op & DO_VERIFY)
-			{
-				if (data_len != 10)
-					just_abort("Incorrect size feature row and bits");
-				if (verify_feature_row(data) != 1)
-					just_abort("Failed to verify feature row.  Programming not completed.");
-				if (verify_feature_bits(data + 8) != 1)
-					just_abort("Failed to verify feature bits.  Programming not completed.");
+			if (op & DO_FEATURE) {
+				if (op & DO_FLASH)
+				{
+					if (data_len != 10)
+						abort_and_clean_up("Incorrect size feature row and bits", erase_type);
+					if (program_feature_row(data) != 1 || wait_not_busy() != 1)
+						abort_and_clean_up("Failed to program feature row", erase_type);
+					if (program_feature_bits(data + 8) != 1 || wait_not_busy() != 1)
+						abort_and_clean_up("Failed to program feature bits", erase_type);
+				}
+				if (op & DO_VERIFY)
+				{
+					if (data_len != 10)
+						just_abort("Incorrect size feature row and bits");
+					if (verify_feature_row(data) != 1)
+						just_abort("Failed to verify feature row.  Programming not completed.");
+					if (verify_feature_bits(data + 8) != 1)
+						just_abort("Failed to verify feature bits.  Programming not completed.");
+				}
 			}
 			break;
 		case SECTION_USERCODE:
 			if (op & DO_FLASH)
 				if (program_user_code(address) != 1 || wait_not_busy() != 1)
-					abort_and_clean_up("Failed to program user code");
+					abort_and_clean_up("Failed to program user code", erase_type);
 			if (op & DO_VERIFY)
 				if (verify_user_code(address) != 1)
 					just_abort("Failed to verify user code.  Programming not completed.");
 			break;
 		case SECTION_END:
-			program_done() != 1 || wait_not_busy() != 1 || refresh() != 1 || wait_not_busy() != 1;
+			if (program_done() == 1)
+				if (wait_not_busy() == 1)
+					if (op & DO_REFRESH)
+						if (refresh() == 1)
+							wait_not_busy() != 1;  // this wait can fail (and also all the next operation)
+							                       // if firmware loaded not support programming from this bus
 			return;
 		case SECTION_NUM_PINS:
 		case SECTION_NUM_FUSES:
@@ -179,7 +197,7 @@ static void do_work(int op)
 				fprintf(stderr, "Security fuse not implemented");
 			break;
 		default:
-			abort_and_clean_up("Unknown JEDEC section");
+			abort_and_clean_up("Unknown JEDEC section", erase_type);
 		}
 	}
 }
@@ -191,7 +209,10 @@ static void print_usage(const char *prog)
 	      "  -a   i2c address\n"
 		  "  -e   Do not erase\n"
 		  "  -f   Do not flash\n"
-		  "  -v   Do not verify\n", stderr);
+		  "  -v   Do not verify\n"
+		  "  -r   Do not refresh\n"
+		  "  -F   Do not erase/program feature row\n"
+		  "  -u   Do not erase user flash\n", stderr);
 	exit(1);
 }
 
@@ -200,38 +221,57 @@ int main(int argc, char **argv)
 	char *device_file = NULL;
 	int mode = MODE_SPI;
 	int i2c_addr = 0x40;
-	int op = DO_ERASE | DO_FLASH | DO_VERIFY;
+	int op = DO_ERASE | DO_FLASH | DO_VERIFY | DO_REFRESH | DO_FEATURE | DO_USERFLASH;
 	char *prog_name = "prog_machxo";
 	if (argc < 2)
 		print_usage(prog_name);
-	argc--; argv++;
-	while (argv[0][0] == '-')
+	if (argc > 0) // remove first parameter
 	{
-		if (argv[0][1] == 'd')
-		{
-			if (argc < 3)
+		argv ++;
+		argc --;
+	}
+	while ((argc > 0) && (argv[0][0] == '-'))
+	{
+		if (argv[0][0] != '\0') {
+			if ((argv[0][1] == 'd') && (argv[0][2] == '\0'))
+			{
+				if (argc < 2)
+					print_usage(prog_name);
+				device_file = argv[1];
+				argv ++;
+				argc --;
+			}
+			else if ((argv[0][1] == 'a') && (argv[0][2] == '\0'))
+			{
+				if (argc < 2)
+					print_usage(prog_name);
+				long tmp = strtol(argv[1], NULL, 0);
+				if ((tmp == LONG_MIN) || (tmp == LONG_MAX))
+				{
+					fprintf(stderr, "%s not valid number\n", argv[1]);
+					print_usage(prog_name);
+				}
+				i2c_addr = tmp;
+
+				mode = MODE_I2C;
+				argv ++;
+				argc --;
+			}
+			else if ((argv[0][1] == 'e') && (argv[0][2] == '\0'))
+				op &= ~DO_ERASE;
+			else if ((argv[0][1] == 'f') && (argv[0][2] == '\0'))
+				op &= ~DO_FLASH;
+			else if ((argv[0][1] == 'v') && (argv[0][2] == '\0'))
+				op &= ~DO_VERIFY;
+			else if ((argv[0][1] == 'r') && (argv[0][2] == '\0'))
+				op &= ~DO_REFRESH;
+			else if ((argv[0][1] == 'F') && (argv[0][2] == '\0'))
+				op &= ~DO_FEATURE;
+			else if ((argv[0][1] == 'u') && (argv[0][2] == '\0'))
+				op &= ~DO_USERFLASH;
+			else
 				print_usage(prog_name);
-			device_file = argv[1];
-			argv ++;
-			argc --;
 		}
-		else if (argv[0][1] == 'a')
-		{
-			if (argc < 3)
-				print_usage(prog_name);
-			i2c_addr = atoi(argv[1]);
-			mode = MODE_I2C;
-			argv ++;
-			argc --;
-		}
-		else if (argv[0][1] == 'e')
-			op &= ~DO_ERASE;
-		else if (argv[0][1] == 'f')
-			op &= ~DO_FLASH;
-		else if (argv[0][1] == 'v')
-			op &= ~DO_VERIFY;
-		else
-			print_usage(prog_name);
 		argv ++;
 		argc --;
 	}

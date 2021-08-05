@@ -59,7 +59,7 @@ int check_device_id(uint32_t expected_id);
 int enable_offline_configuration();
 int read_status_register();
 int wait_not_busy();
-int erase_flash();
+int erase_flash(uint32_t erase_type);
 int set_configuration_flash_address(uint16_t page_address, int is_user_flash);
 int reset_configuration_flash_address();
 int program_configuration_flash(uint8_t *data, int data_len);

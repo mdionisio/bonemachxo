@@ -264,14 +264,16 @@ int wait_not_busy()
 	return 1;
 }
 
-int erase_flash()
+int erase_flash(uint32_t erase_type)
 {
 	int status;
 	int i;
 	DEBUG(fprintf(stderr, "Erase flash...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
-	status = send_receive(ISC_ERASE, ERASE_FEATURE_ROW | ERASE_CONFIGURATION | ERASE_USER_FLASH, DIRECTION_RECEIVE, 0, 0);
+	if (erase_type == 0)
+		erase_type = ERASE_FEATURE_ROW | ERASE_CONFIGURATION | ERASE_USER_FLASH;
+	status = send_receive(ISC_ERASE, erase_type, DIRECTION_RECEIVE, 0, 0);
 	DEBUG(fprintf(stderr, "Erase flash: %d\n", status));
 	return status;
 }
