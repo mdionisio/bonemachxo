@@ -38,6 +38,8 @@ static struct i2c_rdwr_ioctl_data i2c_packets;
 static struct i2c_msg i2c_messages[2];
 
 //#define DEBUG(x) (x)
+//#define DEBUG2 1
+
 #define DEBUG(x)
 #define DEBUG2 0
 
@@ -147,7 +149,7 @@ static int send_receive(uint8_t command, uint32_t operand, int direction, uint8_
 	}
 #endif
 	if (status < 0)
-		perror("message");
+		fprintf(stderr, "send_receive: (mode: %d, i2c: 0x%x) error message: %s\n", mode, i2c_addr, strerror(errno));
 	return status >= 0;
 }
 
@@ -166,7 +168,7 @@ static void to_be_4bytes(uint32_t val, uint8_t *buffer)
 
 int open_device(char *dev_name, int lmode, int addr)
 {
-	DEBUG(fprintf(stderr, "Open device\n"));
+	DEBUG(fprintf(stderr, "Open device(%s, %d, %d)\n", dev_name, lmode, addr));
 	if (dev_name == 0)
 		dev_name = (lmode == MODE_SPI) ? DEFAULT_SPI_DEV : DEFAULT_I2C_DEV;
 	i2c_addr = addr;
@@ -242,7 +244,7 @@ int read_status_register()
 int wait_not_busy()
 {
 	uint32_t status;
-	DEBUG(fprintf(stderr, "Wait not busy\n"));
+	DEBUG(fprintf(stderr, "Wait not busy: Start\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
 	usleep(1000);
@@ -251,10 +253,14 @@ int wait_not_busy()
 	while (status = read_status_register())
 	{
 		if (READ_STATUS_FAIL(status))
+		{
+			DEBUG(fprintf(stderr, "Wait not busy: Error \n"));
 			return status;
+		}
 		if (!READ_STATUS_BUSY(status))
 			break;
 	}
+	DEBUG(fprintf(stderr, "Wait not busy: Done\n"));
 	return 1;
 }
 
@@ -262,66 +268,79 @@ int erase_flash()
 {
 	int status;
 	int i;
-	DEBUG(fprintf(stderr, "Erase flash\n"));
+	DEBUG(fprintf(stderr, "Erase flash...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
 	status = send_receive(ISC_ERASE, ERASE_FEATURE_ROW | ERASE_CONFIGURATION | ERASE_USER_FLASH, DIRECTION_RECEIVE, 0, 0);
+	DEBUG(fprintf(stderr, "Erase flash: %d\n", status));
 	return status;
 }
 
 int enable_offline_configuration()
 {
-	DEBUG(fprintf(stderr, "Enable offline configuration\n"));
+	DEBUG(fprintf(stderr, "Enable offline configuration...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
-	return send_receive(ISC_ENABLE, 0x080000, DIRECTION_RECEIVE, 0, 0); /* TODO: special command for i2c */
+	int ret = send_receive(ISC_ENABLE, 0x080000, DIRECTION_RECEIVE, 0, 0); /* TODO: special command for i2c */
+	DEBUG(fprintf(stderr, "Enable offline configuration: %d\n", ret));
+	return ret;
 }
 
 int erase_user_flash()
 {
-	DEBUG(fprintf(stderr, "Erase user flash\n"));
+	DEBUG(fprintf(stderr, "Erase user flash...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
-	return send_receive(LSC_ERASE_TAG, 0, DIRECTION_RECEIVE, 0, 0);
+	int ret = send_receive(LSC_ERASE_TAG, 0, DIRECTION_RECEIVE, 0, 0);
+	DEBUG(fprintf(stderr, "Erase user flash: %d\n", ret));
+	return ret;
 }
 
 int set_configuration_flash_address(uint16_t page_address, int is_user_flash)
 {
 	uint8_t buffer[4];
 	uint32_t address = page_address;
-	DEBUG(fprintf(stderr, "Set configuration flash address\n"));
+	DEBUG(fprintf(stderr, "Set configuration flash address...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
 	if (is_user_flash)
 		address |= 0x40000000;
 	to_be_4bytes(address, buffer);
-	return send_receive(LSC_WRITE_ADDRESS, 0, DIRECTION_SEND, buffer, 4);
+	int ret = send_receive(LSC_WRITE_ADDRESS, 0, DIRECTION_SEND, buffer, 4);
+	DEBUG(fprintf(stderr, "Set configuration flash address: %d\n", ret));
+	return ret;
 }
 
 int reset_configuration_flash_address()
 {
-	DEBUG("Reset flash address\n");
+	DEBUG(fprintf(stderr, "Reset flash address...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
-	return send_receive(LSC_INIT_ADDRESS, 0, DIRECTION_RECEIVE, 0, 0);
+	int ret = send_receive(LSC_INIT_ADDRESS, 0, DIRECTION_RECEIVE, 0, 0);
+	DEBUG(fprintf(stderr, "Reset flash address: %d\n", ret));
+	return ret;
 }
 
 int program_configuration_flash(uint8_t *data, int data_len)
 {
-	DEBUG(fprintf(stderr, "Program flash\n"));
+	DEBUG(fprintf(stderr, "Program flash...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
-	return send_receive(LSC_PROG_INCR_NV, 1, DIRECTION_SEND, data, data_len);
+	int ret = send_receive(LSC_PROG_INCR_NV, 1, DIRECTION_SEND, data, data_len);
+	DEBUG(fprintf(stderr, "Program flash: %d\n", ret));
+	return ret;
 }
 
 int program_user_code(uint32_t user_code)
 {
 	uint8_t buffer[4];
-	DEBUG(fprintf(stderr, "Program user code\n"));
+	DEBUG(fprintf(stderr, "Program user code...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
 	to_be_4bytes(user_code, buffer);
-	return send_receive(ISC_PROGRAM_USERCODE, 0, DIRECTION_SEND, buffer, 4);
+	int ret = send_receive(ISC_PROGRAM_USERCODE, 0, DIRECTION_SEND, buffer, 4);
+	DEBUG(fprintf(stderr, "Program user code: %d\n", ret));
+	return ret;
 }
 
 int verify_user_code(uint32_t expected_user_code)
@@ -329,18 +348,22 @@ int verify_user_code(uint32_t expected_user_code)
 	uint8_t buffer[4];
 	int status;
 	uint32_t user_code;
-	DEBUG(fprintf(stderr, "Verify user code\n"));
+	DEBUG(fprintf(stderr, "Verify user code...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
 	status = send_receive(USERCODE, 0, DIRECTION_RECEIVE, buffer, 4);
 	if (status != 1)
+	{
+		DEBUG(fprintf(stderr, "Verify user code: error %d\n", status));
 		return status;
+	}
 	user_code = be_4bytes(buffer);
 	if (user_code != expected_user_code)
 	{
 		fprintf(stderr, "Found %08x Expected %08x\n", user_code, expected_user_code);
 		return 0;
 	}
+	DEBUG(fprintf(stderr, "Verify user code: ok\n"));
 	return 1;
 }
 
@@ -351,7 +374,7 @@ int verify_configuration_flash(uint8_t *expected_data, int data_len)
 	int status;
 	uint32_t op;
 	int read_idx, data_idx;
-	DEBUG(fprintf(stderr, "Verify flash\n"));
+	DEBUG(fprintf(stderr, "Verify flash...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
 	if (data_len > MACHXO2_PAGE_SIZE)
@@ -379,7 +402,7 @@ int verify_configuration_flash(uint8_t *expected_data, int data_len)
 	data = (uint8_t*)malloc(read_len);
 	if (data == 0)
 	{
-		fprintf(stderr, "Malloc failed\n");
+		fprintf(stderr, "Verify flash: Malloc failed\n");
 		return 0;
 	}
 	status = send_receive(LSC_READ_INCR_NV, op, DIRECTION_RECEIVE, data, read_len);
@@ -399,15 +422,18 @@ int verify_configuration_flash(uint8_t *expected_data, int data_len)
 		if (((data_idx % MACHXO2_PAGE_SIZE) == 0) && (mode == MODE_I2C))
 			read_idx += 4;
 	}
+	DEBUG(fprintf(stderr, "Verify flash: ok\n"));
 	return 1;
 }
 
 int program_feature_row(uint8_t *feature_row)
 {
-	DEBUG(fprintf(stderr, "Program feature row\n"));
+	DEBUG(fprintf(stderr, "Program feature row...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
-	return send_receive(LSC_PROG_FEATURE, 0, DIRECTION_SEND, feature_row, 8);
+	int ret = send_receive(LSC_PROG_FEATURE, 0, DIRECTION_SEND, feature_row, 8);
+	DEBUG(fprintf(stderr, "Program feature row: %d\n", ret));
+	return ret;
 }
 
 int verify_feature_row(uint8_t *expected_feature_row)
@@ -420,40 +446,56 @@ int verify_feature_row(uint8_t *expected_feature_row)
 		return 1; // Debug mode
 	status = send_receive(LSC_READ_FEATURE, 0, DIRECTION_RECEIVE, buffer, 8);
 	if (status != 1)
+	{
+		DEBUG(fprintf(stderr, "Verify feature row: error %d\n", status));
 		return status;
+	}
 	for (i = 0; i < 8; i++)
 		if (buffer[i] != expected_feature_row[i])
+		{
+			DEBUG(fprintf(stderr, "Verify feature row: error in byte(%d)\n", i));
 			return 0;
+		}
+	DEBUG(fprintf(stderr, "Verify feature row: OK\n"));
 	return 1;
 }
 
 int program_feature_bits(uint8_t *feature_bits)
 {
-	DEBUG(fprintf(stderr, "Program feature bits\n"));
+	DEBUG(fprintf(stderr, "Program feature bits...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
-	return send_receive(LSC_PROG_FEABITS, 0, DIRECTION_SEND, feature_bits, 2);
+	int ret = send_receive(LSC_PROG_FEABITS, 0, DIRECTION_SEND, feature_bits, 2);
+	DEBUG(fprintf(stderr, "Program feature bits: %d\n", ret));
+	return ret;
 }
 
 int verify_feature_bits(uint8_t *expected_feature_bits)
 {
 	uint8_t buffer[2];
 	int status;
-	DEBUG(fprintf(stderr, "Verify feature bits\n"));
+	DEBUG(fprintf(stderr, "Verify feature bits...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
 	status = send_receive(LSC_READ_FEABITS, 0, DIRECTION_RECEIVE, buffer, 2);
 	if (status != 1)
+	{
+		DEBUG(fprintf(stderr, "Verify feature bits: error %d\n", status));
 		return status;
-	return buffer[0] == expected_feature_bits[0] && buffer[1] == expected_feature_bits[1];
+	}
+	int ret = buffer[0] == expected_feature_bits[0] && buffer[1] == expected_feature_bits[1];
+	DEBUG(fprintf(stderr, "Verify feature bits: %d\n", ret));
+	return ret;
 }
 
 int program_done()
 {
-	DEBUG(fprintf(stderr, "Program DONE\n"));
+	DEBUG(fprintf(stderr, "Program DONE...\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
-	return send_receive(ISC_PROGRAM_DONE, 0, DIRECTION_RECEIVE, 0, 0);
+	int ret = send_receive(ISC_PROGRAM_DONE, 0, DIRECTION_RECEIVE, 0, 0);
+	DEBUG(fprintf(stderr, "Program DONE: %d\n", ret));
+	return ret;
 }
 
 int refresh()
@@ -461,5 +503,7 @@ int refresh()
 	DEBUG(fprintf(stderr, "Refresh device\n"));
 	if (dev_fd == -1)
 		return 1; // Debug mode
-	return send_receive(LSC_REFRESH, 0, DIRECTION_RECEIVE, 0, 0);
+	int ret = send_receive(LSC_REFRESH, 0, DIRECTION_RECEIVE, 0, 0);
+	DEBUG(fprintf(stderr, "Refresh device: %d\n", ret));
+	return ret;
 }
