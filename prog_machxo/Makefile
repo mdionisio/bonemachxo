@@ -10,6 +10,10 @@ PROG = prog_machxo
 $(PROG) : $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) -o $(PROG)
 
+clean :
+	-rm -f *.o
+	-rm -f $(PROG)
+
 main.o : $(INCLUDES)
 jedec.o : jedec.h
 machxo.o : machxo.h
